@@ -31,26 +31,31 @@ pub const Hook = struct {
     userCallbacks: std.ArrayList(HookBytes) = undefined,
     tmpBytesBuf: std.ArrayList([16]u8) = undefined,
     depth: usize = 0,
+    mutex: util.Lock = undefined,
 
-    pub fn init(allocator: std.mem.Allocator, targetAddress: usize, hookAdress: usize) error{OutOfMemory}!*Hook {
+    pub fn init(allocator: std.mem.Allocator, targetAddress: usize, hookAdress: usize) *Hook {
         var addr = base_address + targetAddress;
         if (targetAddress > 0x140000000) addr -= (0x140000000);
 
-        const res = try hooks.getOrPut(addr);
+        const res = hooks.getOrPut(addr) catch {
+            @panic("out of mem"); // out of memory is the only error this can throw
+        };
         if (!res.found_existing) {
             res.value_ptr.* = .{};
+            res.value_ptr.userCallbacks = @TypeOf(res.value_ptr.userCallbacks).init(allocator);
+            res.value_ptr.tmpBytesBuf = @TypeOf(res.value_ptr.tmpBytesBuf).init(allocator);
+            res.value_ptr.target = @ptrFromInt(addr);
+            res.value_ptr.mutex = util.Lock.init();
         }
         var self: *Hook = res.value_ptr;
 
-        if (self.depth == 0) {
-            self.userCallbacks = @TypeOf(self.userCallbacks).init(allocator);
-            self.tmpBytesBuf = @TypeOf(self.tmpBytesBuf).init(allocator);
-            self.target = @ptrFromInt(addr);
-        }
-
         util.mem_protect_rw(addr);
-        try self.tmpBytesBuf.append(self.target.*.raw);
-        try self.userCallbacks.append(.{ .formatted = .{ .address = hookAdress } });
+        self.tmpBytesBuf.append(self.target.*.raw) catch {
+            @panic("out of mem"); // out of memory is the only error this can throw
+        };
+        self.userCallbacks.append(.{ .formatted = .{ .address = hookAdress } }) catch {
+            @panic("out of mem"); // out of memory is the only error this can throw
+        };
         util.mem_protect_restore(addr);
 
         self.attach();
@@ -58,19 +63,23 @@ pub const Hook = struct {
     }
 
     pub fn attach(self: *Hook) void {
+        self.mutex.lock();
         util.mem_protect_rw(@intFromPtr(self.target));
         self.target.*.raw = self.userCallbacks.items[self.depth].raw;
         util.mem_protect_restore(@intFromPtr(self.target));
 
         self.depth += 1;
+        self.mutex.unlock();
     }
 
     pub fn detach(self: *Hook) void {
+        self.mutex.lock();
         self.depth -= 1;
 
         util.mem_protect_rw(@intFromPtr(self.target));
         self.target.*.raw = self.tmpBytesBuf.items[self.depth];
         util.mem_protect_restore(@intFromPtr(self.target));
+        self.mutex.unlock();
     }
 };
 

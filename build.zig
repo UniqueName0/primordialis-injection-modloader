@@ -28,7 +28,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path(modloaderPath),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
+
+    modloader.addIncludePath(.{ .cwd_relative = "include/" });
 
     b.installArtifact(modloader);
     b.installArtifact(injector);
