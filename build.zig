@@ -32,6 +32,8 @@ pub fn build(b: *std.Build) void {
     });
 
     modloader.addIncludePath(.{ .cwd_relative = "include/" });
+    modloader.addLibraryPath(.{ .cwd_relative = "../" });
+    modloader.linkSystemLibrary2("lua51", .{});
 
     b.installArtifact(modloader);
     b.installArtifact(injector);
